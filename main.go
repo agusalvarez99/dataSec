@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	//"mime"
 	"net/http"
@@ -91,7 +92,7 @@ func main() {
 		log.Fatalf("No se pudo recuperar el cliente de drive: %v", err)
 	}
 	//el pagesize me limita la cantidad de archivos para mostrar
-	r, err := srv.Files.List().PageSize(15).
+	r, err := srv.Files.List().PageSize(5).
 		Fields("nextPageToken, files(id, name, fileExtension, owners)").Do()
 	if err != nil {
 		log.Fatalf("No se pudieron recuperar los archivos: %v", err)
@@ -101,17 +102,31 @@ func main() {
 		fmt.Println("No se encontraron archivos")
 	} else {
 		for _, i := range r.Files {
-			//fileExtension := getExtension(i.MimeType)
-			fmt.Printf("ID: %s\nNombre: %s\nExtensión: %s\nDueño: %s\n\n", i.Id, i.Name, i.FileExtension, i.Owners[0].EmailAddress)
+			//para determinar si es publico o privado
+			permissions, err := srv.Permissions.List(i.Id).Do()
+			if err != nil {
+				log.Fatalf("No se pudo obtener los permisos del archivo: %v", err)
+			}
+			visibility := "Privado"
+			for _, permiso := range permissions.Permissions {
+				if permiso.Type == "anyone" && (permiso.Role == "reader" || permiso.Role == "writer") {
+					visibility = "Publico"
+					break
+				}
+			}
+			//para determinar cual es la extension del archivo
+			fileExtension := i.FileExtension
+			file, err := srv.Files.Get(i.Id).Do()
+			if err != nil {
+				log.Fatalf("No se pudo obtener informacion del archivo: %v", err)
+			}
+
+			if strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "folder") {
+				fileExtension = "Carpeta de Google"
+			} else if strings.Contains(file.MimeType, "google") {
+				fileExtension = "Documento de Google"
+			}
+			fmt.Printf("ID: %s\nNombre: %s\nExtensión: %s\nDueño: %s\nVisibilidad: %s\n\n", i.Id, i.Name, fileExtension, i.Owners[0].EmailAddress, visibility)
 		}
 	}
 }
-
-/* intente obtener la extension del archivo mediante el mimetype pero no pude
-func getExtension(mimeType string) string {
-	extensions, err := mime.ExtensionsByType(mimeType)
-	if err != nil || len(extensions) == 0 {
-		return ""
-	}
-	return extensions[0]
-}*/
