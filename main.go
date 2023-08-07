@@ -85,7 +85,7 @@ func main() {
 	}
 
 	// si modifico el scope tengo que eliminar el token.json viejo
-	config, err := google.ConfigFromJSON(b, drive.DriveMetadataScope, gmail.GmailSendScope, sheets.SpreadsheetsReadonlyScope)
+	config, err := google.ConfigFromJSON(b, drive.DriveScope, gmail.GmailSendScope, sheets.SpreadsheetsReadonlyScope)
 	if err != nil {
 		log.Fatalf("No se pudo analizar el archivo client secret: %v", err)
 	}
@@ -144,7 +144,7 @@ func main() {
 				insertFile(i.Id, i.Name, fileExtension, i.Owners[0].EmailAddress, visibility)
 			}
 			//preguntar si desea enviar por correo las preguntas
-			fmt.Println("Desea enviar por correo las preguntas de seguridad? y/N")
+			fmt.Println("Desea enviar por correo las preguntas de seguridad?\n Ingrese Y para si\n Ingrese N para no: ")
 			var option string
 			// fmt.Scanln()
 			_, err = fmt.Scanln(&option)
@@ -157,14 +157,16 @@ func main() {
 		}
 
 		fmt.Println("Si ya ha enviado todos los correos y las preguntas han sido contestadas puede procesar las mismas!")
-		fmt.Println("Ingrese Y si desea procesar las repuestas o N si desea terminar la ejecucion del programa")
+		fmt.Println("Ingrese\n Y si desea procesar las repuestas\n Q si desea terminar la ejecucion del programa\n N si quiere ejecutar el Leak Prevention: ")
 		var choice string
 		fmt.Scanln(&choice)
 		if choice == "Y" || choice == "y" {
 			scanResults()
 
-		} else if choice == "N" || choice == "n" {
+		} else if choice == "Q" || choice == "q" {
 			os.Exit(0)
+		} else if choice == "N" || choice == "n" {
+			leakagePrevention()
 		}
 	}
 }
@@ -269,7 +271,7 @@ func scanResults() {
 	if len(resp.Values) == 0 {
 		fmt.Println("No se encontraron datos!")
 	} else {
-		//ACA TENGO QUE RECORRER LAS FILAS
+		//ACA TENGO QUE RECORRER LAS FILAS, hacer que deje de recorrer cuando encuentre una en blanco
 		for _, row := range resp.Values {
 			cellBlank := false
 			// el id esta en la columna C
@@ -323,6 +325,72 @@ func scanResults() {
 			}
 		}
 
+	}
+
+}
+
+func leakagePrevention() {
+	//  conexión con la base de datos MySQL
+	db, err := sql.Open("mysql", "root:agustin@tcp(localhost:3306)/inventario")
+	if err != nil {
+		log.Fatalf("No se pudo conectar a la base: %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query("CALL getCriticos()")
+	if err != nil {
+		log.Fatalf("No se pudo obtener los registros: %v", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			log.Fatalf("No se pudo obtener el id: %v", err)
+		}
+
+		// aca hacer la actualizacion de permisos del archivo con id que esta siendo iterado
+		updatePerm(id)
+
+		//fmt.Printf("ID: %s\n", id)
+		//aca hacer el update en la base de datos de ese id y pasarlo de Publico a Privado
+		_, err = db.Exec("CALL updateVisibility(?)", id)
+		if err != nil {
+			log.Fatalf("No se pudo actualizar el campo: %v", err)
+		}
+
+	}
+	if err := rows.Err(); err != nil {
+		log.Fatalf("Ocurrio un error durante las iteraciones; %v", err)
+	}
+
+}
+
+func updatePerm(id string) {
+	ctx := context.Background()
+	b, err := os.ReadFile("credentials.json")
+	if err != nil {
+		log.Fatalf("No se pudo leer el archivo client secret: %v", err)
+	}
+
+	config, err := google.ConfigFromJSON(b, drive.DriveScope)
+	if err != nil {
+		log.Fatalf("No se pudo analizar el secret client: %v", err)
+	}
+
+	client := getClient(config)
+
+	srv, err := drive.NewService(ctx, option.WithHTTPClient(client))
+	if err != nil {
+		log.Fatalf("No se pudo obtener el cliente de Drive: %v", err)
+	}
+
+	idPermiso := "anyoneWithLink"
+
+	//delete ese permiso
+	err = srv.Permissions.Delete(id, idPermiso).Do()
+	if err != nil {
+		log.Fatalf("No se pudo eliminar el permiso: %v", err)
 	}
 
 }
