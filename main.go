@@ -99,7 +99,7 @@ func main() {
 	//para que no me muestre las carpetas
 	q := "mimeType != 'application/vnd.google-apps.folder'"
 	//el pagesize me limita la cantidad de archivos para mostrar
-	r, err := srv.Files.List().PageSize(1).Q(q).
+	r, err := srv.Files.List().PageSize(15).Q(q).
 		Fields("nextPageToken, files(id, name, fileExtension, owners)").Do()
 	if err != nil {
 		log.Fatalf("No se pudieron recuperar los archivos: %v", err)
@@ -132,17 +132,17 @@ func main() {
 			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "document"):
 				fileExtension = "Documento de Google"
 			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "form"):
-				fileExtension = "Formulario de Google"
+				fileExtension = "Form"
 			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "jam"):
-				fileExtension = "Google Jamboard"
+				fileExtension = "Jam"
 			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "photo"):
-				fileExtension = "Google Photo"
+				fileExtension = "Photo"
 			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "script"):
-				fileExtension = "Google Apps Script"
+				fileExtension = "Script"
 			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "site"):
-				fileExtension = "Sitio de Google"
+				fileExtension = "Site"
 			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "spreadsheet"):
-				fileExtension = "Hoja de Calculo de Google"
+				fileExtension = "Spreadsheet"
 			default:
 				fileExtension = i.FileExtension
 			}
