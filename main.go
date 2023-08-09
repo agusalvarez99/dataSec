@@ -15,6 +15,7 @@ import (
 	"os"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/joho/godotenv"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/drive/v3"
@@ -95,8 +96,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("No se pudo recuperar el cliente de drive: %v", err)
 	}
+	//para que no me muestre las carpetas
+	q := "mimeType != 'application/vnd.google-apps.folder'"
 	//el pagesize me limita la cantidad de archivos para mostrar
-	r, err := srv.Files.List().PageSize(2).
+	r, err := srv.Files.List().PageSize(1).Q(q).
 		Fields("nextPageToken, files(id, name, fileExtension, owners)").Do()
 	if err != nil {
 		log.Fatalf("No se pudieron recuperar los archivos: %v", err)
@@ -120,16 +123,28 @@ func main() {
 				}
 			}
 			//para determinar cual es la extension del archivo
-			fileExtension := i.FileExtension
+			var fileExtension string
 			file, err := srv.Files.Get(i.Id).Do()
 			if err != nil {
 				log.Fatalf("No se pudo obtener informacion del archivo: %v", err)
 			}
-
-			if strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "folder") {
-				fileExtension = "Carpeta de Google"
-			} else if strings.Contains(file.MimeType, "google") {
+			switch {
+			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "document"):
 				fileExtension = "Documento de Google"
+			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "form"):
+				fileExtension = "Formulario de Google"
+			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "jam"):
+				fileExtension = "Google Jamboard"
+			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "photo"):
+				fileExtension = "Google Photo"
+			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "script"):
+				fileExtension = "Google Apps Script"
+			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "site"):
+				fileExtension = "Sitio de Google"
+			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "spreadsheet"):
+				fileExtension = "Hoja de Calculo de Google"
+			default:
+				fileExtension = i.FileExtension
 			}
 			//imprimir por pantalla los datos de los archivos obtenidos
 			fmt.Printf("\nID: %s\nNombre: %s\nExtensión: %s\nDueño: %s\nVisibilidad: %s\n\n", i.Id, i.Name, fileExtension, i.Owners[0].EmailAddress, visibility)
@@ -172,7 +187,18 @@ func main() {
 }
 
 func insertFile(id string, nombre string, extension string, dueño string, visbilidad string) {
-	dsn := "root:agustin@tcp(localhost:3306)/inventario"
+	err := godotenv.Load("dbCred.env")
+	if err != nil {
+		log.Fatalf("No se pudo cargar el archivo: %v", err)
+	}
+	dbUser := os.Getenv("DB_USER")
+	dbPassword := os.Getenv("DB_PASSWORD")
+	dbHost := os.Getenv("DB_HOST")
+	dbPort := os.Getenv("DB_PORT")
+	dbName := os.Getenv("DB_NAME")
+
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", dbUser, dbPassword, dbHost, dbPort, dbName)
+
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		log.Fatalf("No se pudo conectar a la base: %v", err)
@@ -209,8 +235,8 @@ func sendEmail(idArchivo, nombreArchivo, dueño string) {
 
 	//mensaje a enviar
 	to := dueño
-	subject := "Cuestionario de seguridad de archivo " + nombreArchivo + " (" + idArchivo + ")"
-	body := "https://forms.gle/bPSC2wxnyCQATwDC9"
+	subject := "Cuestionario de seguridad de archivo " + nombreArchivo
+	body := "El ID de su archivo es " + idArchivo + " y el enlace a su cuestionario es: https://forms.gle/bPSC2wxnyCQATwDC9"
 	message := createMessage(to, subject, body)
 
 	//envio del mensaje
@@ -312,8 +338,19 @@ func scanResults() {
 
 			fmt.Printf("ID: %s, Puntaje: %d, Nivel de Criticidad: %s\n", id, puntaje, nivelCriticidad)
 
-			//  conexión con la base de datos MySQL
-			db, err := sql.Open("mysql", "root:agustin@tcp(localhost:3306)/inventario")
+			//  conexión con la base de datos
+			err := godotenv.Load("dbCred.env")
+			if err != nil {
+				log.Fatalf("No se pudo cargar el archivo: %v", err)
+			}
+			dbUser := os.Getenv("DB_USER")
+			dbPassword := os.Getenv("DB_PASSWORD")
+			dbHost := os.Getenv("DB_HOST")
+			dbPort := os.Getenv("DB_PORT")
+			dbName := os.Getenv("DB_NAME")
+
+			dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", dbUser, dbPassword, dbHost, dbPort, dbName)
+			db, err := sql.Open("mysql", dsn)
 			if err != nil {
 				log.Fatalf("No se pudo conectar a la base: %v", err)
 			}
@@ -330,8 +367,19 @@ func scanResults() {
 }
 
 func leakagePrevention() {
-	//  conexión con la base de datos MySQL
-	db, err := sql.Open("mysql", "root:agustin@tcp(localhost:3306)/inventario")
+	//  conexión con la base de datos
+	err := godotenv.Load("dbCred.env")
+	if err != nil {
+		log.Fatalf("No se pudo cargar el archivo: %v", err)
+	}
+	dbUser := os.Getenv("DB_USER")
+	dbPassword := os.Getenv("DB_PASSWORD")
+	dbHost := os.Getenv("DB_HOST")
+	dbPort := os.Getenv("DB_PORT")
+	dbName := os.Getenv("DB_NAME")
+
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", dbUser, dbPassword, dbHost, dbPort, dbName)
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		log.Fatalf("No se pudo conectar a la base: %v", err)
 	}
