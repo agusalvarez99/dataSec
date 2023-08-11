@@ -152,18 +152,21 @@ func sendEmail(idArchivo, nombreArchivo, dueño string) {
 }
 
 func createMessage(to, subject, body string) gmail.Message {
+	//creamos el mail pero vacio
 	msg := gmail.Message{}
+	//hacemos un map para poner poner los headers
 	headers := make(map[string]string)
 	headers["To"] = to
 	headers["Subject"] = subject
 	headers["Content-Type"] = "text/html; charset\"utf-8\""
 
+	//armo un string para esos headers y luego despues de estos agrego el body
 	var msgString string
 	for k, v := range headers {
 		msgString += fmt.Sprintf("%s: %s\r\n", k, v)
 	}
 	msgString += "\r\n" + body
-
+	//codificamos en base64 para poder agregarlo al Raw del correo
 	msg.Raw = base64.URLEncoding.EncodeToString([]byte(msgString))
 	return msg
 }
@@ -200,7 +203,7 @@ func scanResults() {
 	if len(resp.Values) == 0 {
 		fmt.Println("No se encontraron datos!")
 	} else {
-		//ACA TENGO QUE RECORRER LAS FILAS, hacer que deje de recorrer cuando encuentre una en blanco
+		//ACA TENGO QUE RECORRER LAS FILAS, deja de recorrer cuando encuentra una en blanco
 		for _, row := range resp.Values {
 			cellBlank := false
 			// el id esta en la columna C (que es la primera dentro del rango que yo defini)
@@ -265,13 +268,14 @@ func leakagePrevention() {
 		log.Fatalf("No se pudo conectar a la base: %v", err)
 	}
 	defer db.Close()
-
+	//obtengo los registros que debo modificar segun reglas del challenge
 	rows, err := db.Query("CALL getCriticos()")
 	if err != nil {
 		log.Fatalf("No se pudo obtener los registros: %v", err)
 	}
 	defer rows.Close()
 
+	// recorro las filas resultado de la query anterior que solo retorna los IDs correspondientes
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
@@ -281,7 +285,6 @@ func leakagePrevention() {
 		// aca hacer la actualizacion de permisos del archivo con id que esta siendo iterado
 		updatePerm(id)
 
-		//fmt.Printf("ID: %s\n", id)
 		//aca hacer el update en la base de datos de ese id y pasarlo de Publico a Privado
 		_, err = db.Exec("CALL updateVisibility(?)", id)
 		if err != nil {
@@ -314,9 +317,10 @@ func updatePerm(id string) {
 		log.Fatalf("No se pudo obtener el cliente de Drive: %v", err)
 	}
 	//este es el ID correspondiente a los permisos publicos, hay que eliminarlo no modificarlo
+	//los demas permisos tienen un ID asociado al usuario de ese permiso especifico
 	idPermiso := "anyoneWithLink"
 
-	//delete ese permiso
+	//delete ese permiso y de esa forma deja de ser publico
 	err = srv.Permissions.Delete(id, idPermiso).Do()
 	if err != nil {
 		log.Fatalf("No se pudo eliminar el permiso: %v", err)
@@ -342,15 +346,19 @@ func analyzeFiles() {
 	if err != nil {
 		log.Fatalf("No se pudo recuperar el cliente de drive: %v", err)
 	}
+
 	//para que no me muestre las carpetas
 	q := "mimeType != 'application/vnd.google-apps.folder'"
+
 	var cantidad int64
 	fmt.Println("Indique la cantidad de archivos que desea iterar: ")
 	_, err = fmt.Scanln(&cantidad)
 	if err != nil {
 		log.Fatalf("No se pudo leer la entrada: %v", err)
 	}
-	//el pagesize me limita la cantidad de archivos para mostrar
+
+	//el pagesize me limita la cantidad de archivos que voy a recorrer en la unidad de drive
+	//si pongo de mas no hay problema, corta despues del ultimo
 	r, err := srv.Files.List().PageSize(cantidad).Q(q).
 		Fields("nextPageToken, files(id, name, fileExtension, owners)").Do()
 	if err != nil {
@@ -361,6 +369,7 @@ func analyzeFiles() {
 	if len(r.Files) == 0 {
 		fmt.Println("No se encontraron archivos")
 	} else {
+		//pasamos a iterar sobre los archivos
 		for _, i := range r.Files {
 			//para determinar si es publico o privado
 			permissions, err := srv.Permissions.List(i.Id).Do()
@@ -374,30 +383,10 @@ func analyzeFiles() {
 					break
 				}
 			}
+
 			//para determinar cual es la extension del archivo
-			var fileExtension string
-			file, err := srv.Files.Get(i.Id).Do()
-			if err != nil {
-				log.Fatalf("No se pudo obtener informacion del archivo: %v", err)
-			}
-			switch {
-			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "document"):
-				fileExtension = "Documento de Google"
-			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "form"):
-				fileExtension = "Form"
-			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "jam"):
-				fileExtension = "Jam"
-			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "photo"):
-				fileExtension = "Photo"
-			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "script"):
-				fileExtension = "Script"
-			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "site"):
-				fileExtension = "Site"
-			case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "spreadsheet"):
-				fileExtension = "Spreadsheet"
-			default:
-				fileExtension = i.FileExtension
-			}
+			fileExtension := findExtension(srv, i)
+
 			//imprimir por pantalla los datos de los archivos obtenidos
 			fmt.Printf("\nID: %s\nNombre: %s\nExtensión: %s\nDueño: %s\nVisibilidad: %s\n\n", i.Id, i.Name, fileExtension, i.Owners[0].EmailAddress, visibility)
 			//preguntar si desea guardarlo
@@ -444,4 +433,31 @@ func connectionDb() (*sql.DB, error) {
 	}
 	//retorno el objeto sql.DB
 	return db, err
+}
+
+func findExtension(srv *drive.Service, i *drive.File) string {
+	var fileExtension string
+	file, err := srv.Files.Get(i.Id).Do()
+	if err != nil {
+		log.Fatalf("No se pudo obtener informacion del archivo: %v", err)
+	}
+	switch {
+	case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "document"):
+		fileExtension = "Documento de Google"
+	case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "form"):
+		fileExtension = "Form"
+	case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "jam"):
+		fileExtension = "Jam"
+	case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "photo"):
+		fileExtension = "Photo"
+	case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "script"):
+		fileExtension = "Script"
+	case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "site"):
+		fileExtension = "Site"
+	case strings.Contains(file.MimeType, "google") && strings.Contains(file.MimeType, "spreadsheet"):
+		fileExtension = "Spreadsheet"
+	default:
+		fileExtension = i.FileExtension
+	}
+	return fileExtension
 }
